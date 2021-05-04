@@ -28,6 +28,49 @@ func PluginBinDirFunc(fn func(string) string) (string, error) {
 	return homedir.PluginBinDir("", ".jx")
 }
 
+// GetConftestBinary returns the path to the locally installed kube-score extension
+func GetConftestBinary(version string) (string, error) {
+	if version == "" {
+		version = ConftestVersion
+	}
+	pluginBinDir, err := PluginBinDir()
+	if err != nil {
+		return "", errors.Wrapf(err, "failed to find plugin home dir")
+	}
+	plugin := CreateConftestPlugin(version)
+	return extensions.EnsurePluginInstalled(plugin, pluginBinDir)
+}
+
+// CreateConftestPlugin creates the kube-score plugin
+func CreateConftestPlugin(version string) jenkinsv1.Plugin {
+	binaries := extensions.CreateBinaries(func(p extensions.Platform) string {
+		goos := p.Goos
+		goarch := strings.ToLower(p.Goarch)
+		if goarch == "amd64" {
+			goarch = "x86_64"
+		}
+		ext := ".tar.gz"
+		if p.IsWindows() {
+			ext = ".zip"
+		}
+		return fmt.Sprintf("https://github.com/open-policy-agent/conftest/releases/download/v%s/conftest_%s_%s_%s%s", version, version, goos, goarch, ext)
+	})
+
+	plugin := jenkinsv1.Plugin{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: ConftestPluginName,
+		},
+		Spec: jenkinsv1.PluginSpec{
+			SubCommand:  "kube-score",
+			Binaries:    binaries,
+			Description: "kube score binary",
+			Name:        ConftestPluginName,
+			Version:     version,
+		},
+	}
+	return plugin
+}
+
 // GetKubeScoreBinary returns the path to the locally installed kube-score extension
 func GetKubeScoreBinary(version string) (string, error) {
 	if version == "" {

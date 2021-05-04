@@ -41,7 +41,9 @@ type Options struct {
 	OutFile         string
 	HelmBinary      string
 	PolarisBinary   string
+	ConftestBinary  string
 	KubeScoreBinary string
+	ConftestArgs    []string
 	KubeScoreArgs   []string
 	KubevalArgs     []string
 	PolarisArgs     []string
@@ -74,6 +76,7 @@ func NewCmdRun() (*cobra.Command, *Options) {
 	cmd.Flags().StringVarP(&o.WorkDir, "work-dir", "w", "", "the work directory used to generate the output. If not specified a new temporary dir is created")
 	cmd.Flags().StringVarP(&o.OutFile, "output", "o", "", "the file to generate")
 	cmd.Flags().StringVarP(&o.HelmBinary, "helm-binary", "", "", "specifies the helm binary location to use. If not specified we download the plugin")
+	cmd.Flags().StringVarP(&o.ConftestBinary, "conftest-binary", "", "", "specifies the conftest binary location to use. If not specified we download the plugin")
 	cmd.Flags().StringVarP(&o.KubeScoreBinary, "kube-score-binary", "", "", "specifies the kube-score binary location to use. If not specified we download the plugin")
 	cmd.Flags().StringVarP(&o.PolarisBinary, "polaris-binary", "n", "", "specifies the polaris binary location to use. If not specified we download the plugin")
 	cmd.Flags().BoolVarP(&o.UseHelmPlugin, "use-helm-plugin", "", false, "uses the jx binary plugin for helm rather than whatever helm is on the $PATH")
@@ -199,7 +202,11 @@ func (o *Options) findChartDirs(err error, dir string) ([]string, error) {
 func (o *Options) verifyChart(co *ChartOutput) error {
 	log.Logger().Infof("verifying chart %s output at %s", co.ChartDir, co.OutputDir)
 
-	err := o.kubeval(co)
+	err := o.conftest(co)
+	if err != nil {
+		return errors.Wrapf(err, "failed to run conftest on chart %s", co.ChartDir)
+	}
+	err = o.kubeval(co)
 	if err != nil {
 		return errors.Wrapf(err, "failed to run kubeval on chart %s", co.ChartDir)
 	}
@@ -269,10 +276,34 @@ func (o *Options) kubeScore(co *ChartOutput) error {
 	return nil
 }
 
+func (o *Options) conftest(co *ChartOutput) error {
+	bin, err := o.GetConftestBinary()
+	if err != nil {
+		return errors.Wrapf(err, "failed to get the polaris binary")
+	}
+
+	args := []string{"test", "-o", "json", co.OutputDir}
+	args = append(args, o.ConftestArgs...)
+	c := &cmdrunner.Command{
+		Name: bin,
+		Args: args,
+	}
+
+	log.Logger().Infof("conftest is verifying chart %s...", co.ChartDir)
+
+	text, err := o.CommandRunner(c)
+	if err != nil {
+		log.Logger().Infof("conftest returned error %s", err.Error())
+		//return errors.Wrapf(err, "failed to run %s", c.CLI())
+	}
+
+	log.Logger().Infof("result:\n%s", termcolor.ColorStatus(text))
+	return nil
+}
 func (o *Options) polaris(co *ChartOutput) error {
 	bin, err := o.GetPolarisBinary()
 	if err != nil {
-		return errors.Wrapf(err, "failed to get the kube-score binary")
+		return errors.Wrapf(err, "failed to get the polaris binary")
 	}
 
 	args := []string{"audit", "--audit-path", co.OutputDir, "--format", "json"}
@@ -292,6 +323,18 @@ func (o *Options) polaris(co *ChartOutput) error {
 
 	log.Logger().Infof("result:\n%s", termcolor.ColorStatus(text))
 	return nil
+}
+
+func (o *Options) GetConftestBinary() (string, error) {
+	if o.ConftestBinary != "" {
+		return o.ConftestBinary, nil
+	}
+	var err error
+	o.ConftestBinary, err = ktplugins.GetConftestBinary(ktplugins.ConftestVersion)
+	if err != nil {
+		return "", errors.Wrapf(err, "failed to download conftest plugin")
+	}
+	return o.ConftestBinary, nil
 }
 
 func (o *Options) GetPolarisBinary() (string, error) {

@@ -3,6 +3,12 @@ package plugins
 import jenkinsv1 "github.com/jenkins-x/jx-api/v4/pkg/apis/jenkins.io/v1"
 
 const (
+	// ConftestPluginName the default name of the conftest plugin
+	ConftestPluginName = "conftest"
+
+	// ConftestVersion the default version of conftest to use
+	ConftestVersion = "0.24.0"
+
 	// KubeScorePluginName the default name of the kube-score plugin
 	KubeScorePluginName = "kube-score"
 
@@ -19,6 +25,8 @@ const (
 var (
 	// Plugins default plugins
 	Plugins = []jenkinsv1.Plugin{
+		CreateConftestPlugin(ConftestVersion),
+		CreatePolarisPlugin(KubeScoreVersion),
 		CreateKubeScorePlugin(KubeScoreVersion),
 	}
 )
