@@ -39,16 +39,12 @@ type Options struct {
 	Dir             string
 	WorkDir         string
 	OutFile         string
-	HelmBinary      string
-	PolarisBinary   string
-	ConftestBinary  string
-	KubeScoreBinary string
-	KubevalBinary   string
-	ConftestArgs    []string
-	KubeScoreArgs   []string
-	KubevalArgs     []string
-	PolarisArgs     []string
-	UseHelmPlugin   bool
+	Helm            BinaryPlugin
+	ConftestPlugin  BinaryPlugin
+	HelmPlugin      BinaryPlugin
+	KubeScorePlugin BinaryPlugin
+	KubevalPlugin   BinaryPlugin
+	PolarisPlugin   BinaryPlugin
 	CommandRunner   cmdrunner.CommandRunner
 }
 
@@ -73,15 +69,16 @@ func NewCmdRun() (*cobra.Command, *Options) {
 		},
 	}
 	o.BaseOptions.AddBaseFlags(cmd)
+
+	o.ConftestPlugin.AddFlags(cmd, "conftest", ktplugins.ConftestVersion, ktplugins.GetConftestBinary)
+	o.Helm.AddFlags(cmd, "helm", plugins.HelmVersion, plugins.GetHelmBinary)
+	o.KubeScorePlugin.AddFlags(cmd, "kubescore", ktplugins.KubeScoreVersion, ktplugins.GetKubeScoreBinary)
+	o.KubevalPlugin.AddFlags(cmd, "kubeval", ktplugins.KubevalVersion, ktplugins.GetKubevalBinary)
+	o.PolarisPlugin.AddFlags(cmd, "polaris", ktplugins.PolarisVersion, ktplugins.GetPolarisBinary)
+
 	cmd.Flags().StringVarP(&o.Dir, "dir", "d", ".", "the directory to look for helm, helmfile or kustomize files")
 	cmd.Flags().StringVarP(&o.WorkDir, "work-dir", "w", "", "the work directory used to generate the output. If not specified a new temporary dir is created")
 	cmd.Flags().StringVarP(&o.OutFile, "output", "o", "", "the file to generate")
-	cmd.Flags().StringVarP(&o.HelmBinary, "helm-binary", "", "", "specifies the helm binary location to use. If not specified we download the plugin")
-	cmd.Flags().StringVarP(&o.ConftestBinary, "conftest-binary", "", "", "specifies the conftest binary location to use. If not specified we download the plugin")
-	cmd.Flags().StringVarP(&o.KubeScoreBinary, "kube-score-binary", "", "", "specifies the kube-score binary location to use. If not specified we download the plugin")
-	cmd.Flags().StringVarP(&o.KubevalBinary, "kubeval-binary", "", "", "specifies the kubeval binary location to use. If not specified we download the plugin")
-	cmd.Flags().StringVarP(&o.PolarisBinary, "polaris-binary", "n", "", "specifies the polaris binary location to use. If not specified we download the plugin")
-	cmd.Flags().BoolVarP(&o.UseHelmPlugin, "use-helm-plugin", "", false, "uses the jx binary plugin for helm rather than whatever helm is on the $PATH")
 	return cmd, o
 }
 
@@ -94,17 +91,7 @@ func (o *Options) Validate() error {
 	if o.CommandRunner == nil {
 		o.CommandRunner = cmdrunner.QuietCommandRunner
 	}
-	if o.HelmBinary == "" {
-		if o.UseHelmPlugin {
-			o.HelmBinary, err = plugins.GetHelmBinary(plugins.HelmVersion)
-			if err != nil {
-				return err
-			}
-		}
-		if o.HelmBinary == "" {
-			o.HelmBinary = "helm"
-		}
-	}
+
 	if o.WorkDir == "" {
 		o.WorkDir, err = ioutil.TempDir("", "")
 		if err != nil {
@@ -140,6 +127,11 @@ func (o *Options) Run() error {
 		return nil
 	}
 
+	helmbin, err := o.Helm.GetBinary()
+	if err != nil {
+		return errors.Wrapf(err, "failed to find helm binary")
+	}
+
 	for _, d := range chartDirs {
 
 		rel, err := filepath.Rel(dir, d)
@@ -159,7 +151,7 @@ func (o *Options) Run() error {
 
 		args := []string{"template", "--output-dir", outDir, releaseName, d}
 		c := &cmdrunner.Command{
-			Name: o.HelmBinary,
+			Name: helmbin,
 			Args: args,
 			Out:  os.Stdout,
 			Err:  os.Stderr,
@@ -224,13 +216,13 @@ func (o *Options) verifyChart(co *ChartOutput) error {
 }
 
 func (o *Options) kubeval(co *ChartOutput) error {
-	bin, err := o.GetKubevalBinary()
+	bin, err := o.KubevalPlugin.GetBinary()
 	if err != nil {
 		return errors.Wrapf(err, "failed to get the kubeval binary")
 	}
 
 	args := []string{"-o", "json", "-d", co.OutputDir}
-	args = append(args, o.KubevalArgs...)
+	args = append(args, o.KubevalPlugin.Args...)
 	c := &cmdrunner.Command{
 		Name: bin,
 		Args: args,
@@ -248,7 +240,7 @@ func (o *Options) kubeval(co *ChartOutput) error {
 }
 
 func (o *Options) kubeScore(co *ChartOutput) error {
-	bin, err := o.GetKubeScoreBinary()
+	bin, err := o.KubeScorePlugin.GetBinary()
 	if err != nil {
 		return errors.Wrapf(err, "failed to get the kube-score binary")
 	}
@@ -263,7 +255,7 @@ func (o *Options) kubeScore(co *ChartOutput) error {
 	}
 
 	args := []string{"score", "-o", "json"}
-	args = append(args, o.KubeScoreArgs...)
+	args = append(args, o.KubeScorePlugin.Args...)
 	args = append(args, fileNames...)
 	c := &cmdrunner.Command{
 		Name: bin,
@@ -283,13 +275,13 @@ func (o *Options) kubeScore(co *ChartOutput) error {
 }
 
 func (o *Options) conftest(co *ChartOutput) error {
-	bin, err := o.GetConftestBinary()
+	bin, err := o.ConftestPlugin.GetBinary()
 	if err != nil {
 		return errors.Wrapf(err, "failed to get the polaris binary")
 	}
 
 	args := []string{"test", "-o", "json", co.OutputDir}
-	args = append(args, o.ConftestArgs...)
+	args = append(args, o.ConftestPlugin.Args...)
 	c := &cmdrunner.Command{
 		Name: bin,
 		Args: args,
@@ -308,13 +300,13 @@ func (o *Options) conftest(co *ChartOutput) error {
 }
 
 func (o *Options) polaris(co *ChartOutput) error {
-	bin, err := o.GetPolarisBinary()
+	bin, err := o.PolarisPlugin.GetBinary()
 	if err != nil {
 		return errors.Wrapf(err, "failed to get the polaris binary")
 	}
 
 	args := []string{"audit", "--audit-path", co.OutputDir, "--format", "json"}
-	args = append(args, o.PolarisArgs...)
+	args = append(args, o.PolarisPlugin.Args...)
 	c := &cmdrunner.Command{
 		Name: bin,
 		Args: args,
@@ -330,54 +322,6 @@ func (o *Options) polaris(co *ChartOutput) error {
 
 	log.Logger().Infof("result:\n%s", termcolor.ColorStatus(text))
 	return nil
-}
-
-func (o *Options) GetConftestBinary() (string, error) {
-	if o.ConftestBinary != "" {
-		return o.ConftestBinary, nil
-	}
-	var err error
-	o.ConftestBinary, err = ktplugins.GetConftestBinary(ktplugins.ConftestVersion)
-	if err != nil {
-		return "", errors.Wrapf(err, "failed to download conftest plugin")
-	}
-	return o.ConftestBinary, nil
-}
-
-func (o *Options) GetPolarisBinary() (string, error) {
-	if o.PolarisBinary != "" {
-		return o.PolarisBinary, nil
-	}
-	var err error
-	o.PolarisBinary, err = ktplugins.GetPolarisBinary(ktplugins.PolarisVersion)
-	if err != nil {
-		return "", errors.Wrapf(err, "failed to download polaris plugin")
-	}
-	return o.PolarisBinary, nil
-}
-
-func (o *Options) GetKubeScoreBinary() (string, error) {
-	if o.KubeScoreBinary != "" {
-		return o.KubeScoreBinary, nil
-	}
-	var err error
-	o.KubeScoreBinary, err = ktplugins.GetKubeScoreBinary(ktplugins.KubeScoreVersion)
-	if err != nil {
-		return "", errors.Wrapf(err, "failed to download kube-score plugin")
-	}
-	return o.KubeScoreBinary, nil
-}
-
-func (o *Options) GetKubevalBinary() (string, error) {
-	if o.KubevalBinary != "" {
-		return o.KubevalBinary, nil
-	}
-	var err error
-	o.KubevalBinary, err = ktplugins.GetKubevalBinary(ktplugins.KubevalVersion)
-	if err != nil {
-		return "", errors.Wrapf(err, "failed to download kubeval plugin")
-	}
-	return o.KubevalBinary, nil
 }
 
 func (o *Options) findYAMLFiles(dir string) ([]string, error) {
