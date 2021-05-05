@@ -39,6 +39,7 @@ func TestCmdRun(t *testing.T) {
 
 		_, o := run.NewCmdRun()
 		o.Dir = srcDir
+		o.ChartsDir = srcDir
 		o.CommandRunner = cmdrunner.DefaultCommandRunner
 		err = o.Run()
 		require.NoError(t, err, "failed to run the command")

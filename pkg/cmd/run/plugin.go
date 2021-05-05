@@ -2,6 +2,7 @@ package run
 
 import (
 	"fmt"
+	"github.com/jenkins-x-plugins/jx-kube-test/pkg/apis/kubetest/v1alpha1"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
@@ -14,7 +15,15 @@ type BinaryPlugin struct {
 	Args       []string
 }
 
-func (o *BinaryPlugin) GetBinary() (string, error) {
+func (o *BinaryPlugin) GetBinary(t *v1alpha1.Test) (string, error) {
+	if t != nil && t.Version != "" {
+		o.Binary = ""
+		o.Version = t.Version
+		if len(t.Args) > 0 {
+			o.Args = t.Args
+		}
+
+	}
 	if o.Binary != "" {
 		return o.Binary, nil
 	}

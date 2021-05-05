@@ -1,7 +1,9 @@
 package run
 
 import (
+	"fmt"
 	"github.com/jenkins-x-plugins/jx-gitops/pkg/plugins"
+	"github.com/jenkins-x-plugins/jx-kube-test/pkg/apis/kubetest/v1alpha1"
 	ktplugins "github.com/jenkins-x-plugins/jx-kube-test/pkg/plugins"
 	"github.com/jenkins-x/jx-helpers/v3/pkg/cmdrunner"
 	"github.com/jenkins-x/jx-helpers/v3/pkg/cobras/helper"
@@ -9,6 +11,7 @@ import (
 	"github.com/jenkins-x/jx-helpers/v3/pkg/files"
 	"github.com/jenkins-x/jx-helpers/v3/pkg/options"
 	"github.com/jenkins-x/jx-helpers/v3/pkg/termcolor"
+	"github.com/jenkins-x/jx-helpers/v3/pkg/yamls"
 	"github.com/jenkins-x/jx-logging/v3/pkg/log"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
@@ -37,8 +40,11 @@ type Options struct {
 	options.BaseOptions
 
 	Dir             string
+	SettingsFile    string
 	WorkDir         string
 	OutFile         string
+	ChartsDir       string
+	RecurseCharts   bool
 	Helm            BinaryPlugin
 	ConftestPlugin  BinaryPlugin
 	HelmPlugin      BinaryPlugin
@@ -46,11 +52,11 @@ type Options struct {
 	KubevalPlugin   BinaryPlugin
 	PolarisPlugin   BinaryPlugin
 	CommandRunner   cmdrunner.CommandRunner
+	Settings        *v1alpha1.KubeTest
 }
 
-type ChartOutput struct {
-	ChartDir    string
-	ReleaseName string
+type ResourceLocation struct {
+	Description string
 	OutputDir   string
 }
 
@@ -77,6 +83,9 @@ func NewCmdRun() (*cobra.Command, *Options) {
 	o.PolarisPlugin.AddFlags(cmd, "polaris", ktplugins.PolarisVersion, ktplugins.GetPolarisBinary)
 
 	cmd.Flags().StringVarP(&o.Dir, "dir", "d", ".", "the directory to look for helm, helmfile or kustomize files")
+	cmd.Flags().StringVarP(&o.ChartsDir, "chart-dir", "", "charts", "the directory to look for helm charts if no .jx/kube-test/settings.yaml file is found")
+	cmd.Flags().BoolVarP(&o.RecurseCharts, "recurse", "r", true, "should we recurse through the chart dir to find charts if no .jx/kube-test/settings.yaml file is found")
+	cmd.Flags().StringVarP(&o.SettingsFile, "settings", "s", "", "the settings file to use. If not specified will look in .jx/kube-test/settings.yaml in the directory")
 	cmd.Flags().StringVarP(&o.WorkDir, "work-dir", "w", "", "the work directory used to generate the output. If not specified a new temporary dir is created")
 	cmd.Flags().StringVarP(&o.OutFile, "output", "o", "", "the file to generate")
 	return cmd, o
@@ -98,6 +107,30 @@ func (o *Options) Validate() error {
 			return errors.Wrapf(err, "failed to create temp dir")
 		}
 	}
+
+	if o.SettingsFile == "" {
+		o.SettingsFile = filepath.Join(o.Dir, ".jx", "kube-test", "settings.yaml")
+	}
+
+	if o.Settings == nil {
+		exists, err := files.FileExists(o.SettingsFile)
+		if err != nil {
+			return errors.Wrapf(err, "failed to check if file exists %s", o.SettingsFile)
+		}
+		if exists {
+			o.Settings = &v1alpha1.KubeTest{}
+			err = yamls.LoadFile(o.SettingsFile, o.Settings)
+			if err != nil {
+				return errors.Wrapf(err, "failed to load file %s", o.SettingsFile)
+			}
+			log.Logger().Debugf("loaded settings file %s", info(o.SettingsFile))
+		} else {
+			o.Settings = o.createDefaultSettings()
+		}
+	}
+	if o.Settings == nil {
+		return errors.Errorf("failed to discover or generate settings")
+	}
 	return nil
 }
 
@@ -108,15 +141,82 @@ func (o *Options) Run() error {
 		return errors.Wrapf(err, "failed to validate")
 	}
 
-	dir := o.Dir
+	for i := range o.Settings.Spec.Rules {
+		rule := &o.Settings.Spec.Rules[i]
+
+		if rule.Charts != nil {
+			err = o.TestCharts(rule, rule.Charts)
+			if err != nil {
+				return errors.Wrapf(err, "failed to test charts at %s", rule.Charts.Dir)
+			}
+			continue
+		}
+		if rule.Resources != nil {
+			err = o.TestResources(rule, rule.Resources)
+			if err != nil {
+				return errors.Wrapf(err, "failed to test resources at %s", rule.Resources.Dir)
+			}
+			continue
+		}
+		return errors.Errorf("invalid rule %#v has neither charts or resources", rule)
+	}
+	return nil
+}
+
+// TestResources tests the resources
+func (o *Options) TestResources(rule *v1alpha1.Rule, resources *v1alpha1.Source) error {
+	dir := resources.Dir
 	exists, err := files.DirExists(dir)
 	if err != nil {
 		return errors.Wrapf(err, "failed to check if dir exists %s", dir)
 	}
 	if !exists {
-		return options.InvalidOptionf("dir", o.Dir, "dir does not exist")
+		return errors.Errorf("the resource dir %s does not exist", dir)
 	}
 
+	co := &ResourceLocation{
+		Description: fmt.Sprintf("resources %s", dir),
+		OutputDir:   dir,
+	}
+	err = o.verifyResources(co, &rule.Tests)
+	if err != nil {
+		return errors.Wrapf(err, "failed to verify resources in dir  %s", dir)
+	}
+	return nil
+}
+
+// TestCharts tests the charts
+func (o *Options) TestCharts(rule *v1alpha1.Rule, charts *v1alpha1.Charts) error {
+	dir := charts.Dir
+	exists, err := files.DirExists(dir)
+	if err != nil {
+		return errors.Wrapf(err, "failed to check if dir exists %s", dir)
+	}
+	if !exists {
+		return errors.Errorf("the charts dir %s does not exist", dir)
+	}
+
+	helmbin, err := o.Helm.GetBinary(nil)
+	if err != nil {
+		return errors.Wrapf(err, "failed to find helm binary")
+	}
+
+	if !charts.Recurse {
+		path := filepath.Join(dir, "Chart.yaml")
+		exists, err = files.FileExists(path)
+		if err != nil {
+			return errors.Wrapf(err, "failed to check if file exists %s", path)
+		}
+		if !exists {
+			return errors.Errorf("the charts dir %s does not contain a Chart.yaml file. You can enable 'recurse: true' to find charts inside the directory", dir)
+		}
+
+		err = o.helmTemplateAndVerify(rule, helmbin, dir)
+		if err != nil {
+			return errors.Wrapf(err, "failed to test chart %s", dir)
+		}
+		return nil
+	}
 	chartDirs, err := o.findChartDirs(err, dir)
 	if err != nil {
 		return errors.Wrapf(err, "failed to find charts in dir %s", dir)
@@ -127,52 +227,54 @@ func (o *Options) Run() error {
 		return nil
 	}
 
-	helmbin, err := o.Helm.GetBinary()
-	if err != nil {
-		return errors.Wrapf(err, "failed to find helm binary")
-	}
-
 	for _, d := range chartDirs {
-
-		rel, err := filepath.Rel(dir, d)
+		err = o.helmTemplateAndVerify(rule, helmbin, d)
 		if err != nil {
-			return errors.Wrapf(err, "failed to find relative chart dir from %s to %s", rel, d)
-		}
-
-		// TODO have a loop for all the different value sets to pass in....
-		i := 1
-		releaseName := "rel" + strconv.Itoa(i)
-		outDir := filepath.Join(o.WorkDir, rel, releaseName)
-
-		err = os.MkdirAll(outDir, files.DefaultDirWritePermissions)
-		if err != nil {
-			return errors.Wrapf(err, "failed to create output dir %s", outDir)
-		}
-
-		args := []string{"template", "--output-dir", outDir, releaseName, d}
-		c := &cmdrunner.Command{
-			Name: helmbin,
-			Args: args,
-			Out:  os.Stdout,
-			Err:  os.Stderr,
-		}
-
-		_, err = o.CommandRunner(c)
-		if err != nil {
-			return errors.Wrapf(err, "failed to run %s", c.CLI())
-		}
-
-		co := &ChartOutput{
-			ChartDir:    d,
-			ReleaseName: releaseName,
-			OutputDir:   outDir,
-		}
-		err = o.verifyChart(co)
-		if err != nil {
-			return errors.Wrapf(err, "failed to verify chart output for %s", d)
+			return errors.Wrapf(err, "failed to test chart %s", d)
 		}
 	}
 
+	return nil
+}
+
+func (o *Options) helmTemplateAndVerify(rule *v1alpha1.Rule, helmbin string, d string) error {
+	rel, err := filepath.Rel(o.Dir, d)
+	if err != nil {
+		log.Logger().Warnf("failed to find relative chart dir from %s to %s", o.Dir, d)
+		rel = d
+	}
+
+	// TODO support iterating through available values to pass in
+	i := 1
+	releaseName := "rel" + strconv.Itoa(i)
+	outDir := filepath.Join(o.WorkDir, rel, releaseName)
+
+	err = os.MkdirAll(outDir, files.DefaultDirWritePermissions)
+	if err != nil {
+		return errors.Wrapf(err, "failed to create output dir %s", outDir)
+	}
+
+	args := []string{"template", "--output-dir", outDir, releaseName, d}
+	c := &cmdrunner.Command{
+		Name: helmbin,
+		Args: args,
+		Out:  os.Stdout,
+		Err:  os.Stderr,
+	}
+
+	_, err = o.CommandRunner(c)
+	if err != nil {
+		return errors.Wrapf(err, "failed to run %s", c.CLI())
+	}
+
+	co := &ResourceLocation{
+		Description: fmt.Sprintf("chart %s release %s", d, releaseName),
+		OutputDir:   outDir,
+	}
+	err = o.verifyResources(co, &rule.Tests)
+	if err != nil {
+		return errors.Wrapf(err, "failed to verify chart output for %s", d)
+	}
 	return nil
 }
 
@@ -193,30 +295,38 @@ func (o *Options) findChartDirs(err error, dir string) ([]string, error) {
 	return chartDirs, err
 }
 
-func (o *Options) verifyChart(co *ChartOutput) error {
-	log.Logger().Infof("verifying chart %s output at %s", co.ChartDir, co.OutputDir)
+func (o *Options) verifyResources(co *ResourceLocation, tests *v1alpha1.Tests) error {
+	log.Logger().Infof("verifying %s output at %s", co.Description, co.OutputDir)
 
-	err := o.kubeval(co)
-	if err != nil {
-		return errors.Wrapf(err, "failed to run kubeval on chart %s", co.ChartDir)
+	if tests.Kubeval != nil {
+		err := o.kubeval(co, tests.Kubeval)
+		if err != nil {
+			return errors.Wrapf(err, "failed to run kubeval on %s", co.Description)
+		}
 	}
-	err = o.conftest(co)
-	if err != nil {
-		return errors.Wrapf(err, "failed to run conftest on chart %s", co.ChartDir)
+	if tests.Conftest != nil {
+		err := o.conftest(co, tests.Conftest)
+		if err != nil {
+			return errors.Wrapf(err, "failed to run conftest on %s", co.Description)
+		}
 	}
-	err = o.polaris(co)
-	if err != nil {
-		return errors.Wrapf(err, "failed to run polaris on chart %s", co.ChartDir)
+	if tests.Kubescore != nil {
+		err := o.kubescore(co, tests.Kubescore)
+		if err != nil {
+			return errors.Wrapf(err, "failed to run kube-score on %s", co.Description)
+		}
 	}
-	err = o.kubeScore(co)
-	if err != nil {
-		return errors.Wrapf(err, "failed to run kube-score on chart %s", co.ChartDir)
+	if tests.Polaris != nil {
+		err := o.polaris(co, tests.Polaris)
+		if err != nil {
+			return errors.Wrapf(err, "failed to run polaris on %s", co.Description)
+		}
 	}
 	return nil
 }
 
-func (o *Options) kubeval(co *ChartOutput) error {
-	bin, err := o.KubevalPlugin.GetBinary()
+func (o *Options) kubeval(co *ResourceLocation, kubeval *v1alpha1.Test) error {
+	bin, err := o.KubevalPlugin.GetBinary(nil)
 	if err != nil {
 		return errors.Wrapf(err, "failed to get the kubeval binary")
 	}
@@ -228,7 +338,7 @@ func (o *Options) kubeval(co *ChartOutput) error {
 		Args: args,
 	}
 
-	log.Logger().Infof("kubeval is verifying chart %s...", co.ChartDir)
+	log.Logger().Infof("kubeval is verifying %s...", co.Description)
 
 	text, err := o.CommandRunner(c)
 	if err != nil {
@@ -239,8 +349,8 @@ func (o *Options) kubeval(co *ChartOutput) error {
 	return nil
 }
 
-func (o *Options) kubeScore(co *ChartOutput) error {
-	bin, err := o.KubeScorePlugin.GetBinary()
+func (o *Options) kubescore(co *ResourceLocation, t *v1alpha1.Test) error {
+	bin, err := o.KubeScorePlugin.GetBinary(t)
 	if err != nil {
 		return errors.Wrapf(err, "failed to get the kube-score binary")
 	}
@@ -250,7 +360,7 @@ func (o *Options) kubeScore(co *ChartOutput) error {
 		return errors.Wrapf(err, "failed to find YAML files in dir %s", co.OutputDir)
 	}
 	if len(fileNames) == 0 {
-		log.Logger().Warnf("no YAML files found for chart %s in output dir %s", co.ChartDir, co.OutputDir)
+		log.Logger().Warnf("no YAML files found for %s in output dir %s", co.Description, co.OutputDir)
 		return nil
 	}
 
@@ -262,7 +372,7 @@ func (o *Options) kubeScore(co *ChartOutput) error {
 		Args: args,
 	}
 
-	log.Logger().Infof("kube-score is verifying chart %s...", co.ChartDir)
+	log.Logger().Infof("kube-score is verifying %s...", co.Description)
 
 	text, err := o.CommandRunner(c)
 	if err != nil {
@@ -274,8 +384,8 @@ func (o *Options) kubeScore(co *ChartOutput) error {
 	return nil
 }
 
-func (o *Options) conftest(co *ChartOutput) error {
-	bin, err := o.ConftestPlugin.GetBinary()
+func (o *Options) conftest(co *ResourceLocation, t *v1alpha1.Test) error {
+	bin, err := o.ConftestPlugin.GetBinary(t)
 	if err != nil {
 		return errors.Wrapf(err, "failed to get the polaris binary")
 	}
@@ -287,7 +397,7 @@ func (o *Options) conftest(co *ChartOutput) error {
 		Args: args,
 	}
 
-	log.Logger().Infof("conftest is verifying chart %s...", co.ChartDir)
+	log.Logger().Infof("conftest is verifying %s...", co.Description)
 
 	text, err := o.CommandRunner(c)
 	if err != nil {
@@ -299,8 +409,8 @@ func (o *Options) conftest(co *ChartOutput) error {
 	return nil
 }
 
-func (o *Options) polaris(co *ChartOutput) error {
-	bin, err := o.PolarisPlugin.GetBinary()
+func (o *Options) polaris(co *ResourceLocation, t *v1alpha1.Test) error {
+	bin, err := o.PolarisPlugin.GetBinary(t)
 	if err != nil {
 		return errors.Wrapf(err, "failed to get the polaris binary")
 	}
@@ -312,7 +422,7 @@ func (o *Options) polaris(co *ChartOutput) error {
 		Args: args,
 	}
 
-	log.Logger().Infof("polaris is verifying chart %s...", co.ChartDir)
+	log.Logger().Infof("polaris is verifying %s...", co.Description)
 
 	text, err := o.CommandRunner(c)
 	if err != nil {
@@ -339,4 +449,23 @@ func (o *Options) findYAMLFiles(dir string) ([]string, error) {
 		return nil, errors.Wrapf(err, "failed to find YAML files in dir %s", dir)
 	}
 	return answer, nil
+}
+
+func (o *Options) createDefaultSettings() *v1alpha1.KubeTest {
+	return &v1alpha1.KubeTest{
+		Spec: v1alpha1.KubeTestSpec{
+			Rules: []v1alpha1.Rule{
+				{
+					Charts: &v1alpha1.Charts{
+						Dir:     o.ChartsDir,
+						Recurse: o.RecurseCharts,
+					},
+					Tests: v1alpha1.Tests{
+						Kubeval: &v1alpha1.Test{},
+						Polaris: &v1alpha1.Test{},
+					},
+				},
+			},
+		},
+	}
 }
