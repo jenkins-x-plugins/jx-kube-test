@@ -106,6 +106,41 @@ func CreateKubeScorePlugin(version string) jenkinsv1.Plugin {
 	return plugin
 }
 
+// GetKubevalBinary returns the path to the locally installed kube-score extension
+func GetKubevalBinary(version string) (string, error) {
+	if version == "" {
+		version = KubevalVersion
+	}
+	pluginBinDir, err := PluginBinDir()
+	if err != nil {
+		return "", errors.Wrapf(err, "failed to find plugin home dir")
+	}
+	plugin := CreateKubevalPlugin(version)
+	return extensions.EnsurePluginInstalled(plugin, pluginBinDir)
+}
+
+// CreateKubevalPlugin creates the kube-score plugin
+func CreateKubevalPlugin(version string) jenkinsv1.Plugin {
+	binaries := extensions.CreateBinaries(func(p extensions.Platform) string {
+		ext := ".tar.gz"
+		return fmt.Sprintf("https://github.com/instrumenta/kubeval/releases/download/v%s/kubeval-%s-%s%s", version, strings.ToLower(p.Goos), strings.ToLower(p.Goarch), ext)
+	})
+
+	plugin := jenkinsv1.Plugin{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: KubevalPluginName,
+		},
+		Spec: jenkinsv1.PluginSpec{
+			SubCommand:  "kube-score",
+			Binaries:    binaries,
+			Description: "kube score binary",
+			Name:        KubevalPluginName,
+			Version:     version,
+		},
+	}
+	return plugin
+}
+
 // GetPolarisBinary returns the path to the locally installed kube-score extension
 func GetPolarisBinary(version string) (string, error) {
 	if version == "" {

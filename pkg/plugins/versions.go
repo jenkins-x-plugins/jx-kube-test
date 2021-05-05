@@ -15,10 +15,16 @@ const (
 	// KubeScoreVersion the default version of kube-score to use
 	KubeScoreVersion = "1.11.0"
 
-	// PolarisPluginName the default name of the kube-score plugin
+	// KubevalPluginName the default name of the kubeval plugin
+	KubevalPluginName = "kubeval"
+
+	// KubevalVersion the default version of kubeval to use
+	KubevalVersion = "0.16.1"
+
+	// PolarisPluginName the default name of the polaris plugin
 	PolarisPluginName = "polaris"
 
-	// PolarisVersion the default version of kube-score to use
+	// PolarisVersion the default version of polaris to use
 	PolarisVersion = "3.2.1"
 )
 
@@ -28,5 +34,6 @@ var (
 		CreateConftestPlugin(ConftestVersion),
 		CreatePolarisPlugin(KubeScoreVersion),
 		CreateKubeScorePlugin(KubeScoreVersion),
+		CreateKubevalPlugin(KubevalVersion),
 	}
 )

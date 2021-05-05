@@ -43,6 +43,7 @@ type Options struct {
 	PolarisBinary   string
 	ConftestBinary  string
 	KubeScoreBinary string
+	KubevalBinary   string
 	ConftestArgs    []string
 	KubeScoreArgs   []string
 	KubevalArgs     []string
@@ -78,6 +79,7 @@ func NewCmdRun() (*cobra.Command, *Options) {
 	cmd.Flags().StringVarP(&o.HelmBinary, "helm-binary", "", "", "specifies the helm binary location to use. If not specified we download the plugin")
 	cmd.Flags().StringVarP(&o.ConftestBinary, "conftest-binary", "", "", "specifies the conftest binary location to use. If not specified we download the plugin")
 	cmd.Flags().StringVarP(&o.KubeScoreBinary, "kube-score-binary", "", "", "specifies the kube-score binary location to use. If not specified we download the plugin")
+	cmd.Flags().StringVarP(&o.KubevalBinary, "kubeval-binary", "", "", "specifies the kubeval binary location to use. If not specified we download the plugin")
 	cmd.Flags().StringVarP(&o.PolarisBinary, "polaris-binary", "n", "", "specifies the polaris binary location to use. If not specified we download the plugin")
 	cmd.Flags().BoolVarP(&o.UseHelmPlugin, "use-helm-plugin", "", false, "uses the jx binary plugin for helm rather than whatever helm is on the $PATH")
 	return cmd, o
@@ -202,13 +204,13 @@ func (o *Options) findChartDirs(err error, dir string) ([]string, error) {
 func (o *Options) verifyChart(co *ChartOutput) error {
 	log.Logger().Infof("verifying chart %s output at %s", co.ChartDir, co.OutputDir)
 
-	err := o.conftest(co)
-	if err != nil {
-		return errors.Wrapf(err, "failed to run conftest on chart %s", co.ChartDir)
-	}
-	err = o.kubeval(co)
+	err := o.kubeval(co)
 	if err != nil {
 		return errors.Wrapf(err, "failed to run kubeval on chart %s", co.ChartDir)
+	}
+	err = o.conftest(co)
+	if err != nil {
+		return errors.Wrapf(err, "failed to run conftest on chart %s", co.ChartDir)
 	}
 	err = o.polaris(co)
 	if err != nil {
@@ -222,11 +224,15 @@ func (o *Options) verifyChart(co *ChartOutput) error {
 }
 
 func (o *Options) kubeval(co *ChartOutput) error {
-	// TODO allow a plugin....
+	bin, err := o.GetKubevalBinary()
+	if err != nil {
+		return errors.Wrapf(err, "failed to get the kubeval binary")
+	}
+
 	args := []string{"-o", "json", "-d", co.OutputDir}
 	args = append(args, o.KubevalArgs...)
 	c := &cmdrunner.Command{
-		Name: "kubeval",
+		Name: bin,
 		Args: args,
 	}
 
@@ -300,6 +306,7 @@ func (o *Options) conftest(co *ChartOutput) error {
 	log.Logger().Infof("result:\n%s", termcolor.ColorStatus(text))
 	return nil
 }
+
 func (o *Options) polaris(co *ChartOutput) error {
 	bin, err := o.GetPolarisBinary()
 	if err != nil {
@@ -359,6 +366,18 @@ func (o *Options) GetKubeScoreBinary() (string, error) {
 		return "", errors.Wrapf(err, "failed to download kube-score plugin")
 	}
 	return o.KubeScoreBinary, nil
+}
+
+func (o *Options) GetKubevalBinary() (string, error) {
+	if o.KubevalBinary != "" {
+		return o.KubevalBinary, nil
+	}
+	var err error
+	o.KubevalBinary, err = ktplugins.GetKubevalBinary(ktplugins.KubevalVersion)
+	if err != nil {
+		return "", errors.Wrapf(err, "failed to download kubeval plugin")
+	}
+	return o.KubevalBinary, nil
 }
 
 func (o *Options) findYAMLFiles(dir string) ([]string, error) {

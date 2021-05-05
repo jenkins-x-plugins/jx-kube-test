@@ -2,6 +2,7 @@ package run_test
 
 import (
 	"github.com/jenkins-x-plugins/jx-kube-test/pkg/cmd/run"
+	"github.com/jenkins-x/jx-helpers/v3/pkg/cmdrunner"
 	"io/ioutil"
 	"path/filepath"
 	"strings"
@@ -38,7 +39,7 @@ func TestCmdRun(t *testing.T) {
 
 		_, o := run.NewCmdRun()
 		o.Dir = srcDir
-
+		o.CommandRunner = cmdrunner.DefaultCommandRunner
 		err = o.Run()
 		require.NoError(t, err, "failed to run the command")
 
