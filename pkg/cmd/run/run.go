@@ -325,15 +325,19 @@ func (o *Options) verifyResources(co *ResourceLocation, tests *v1alpha1.Tests) e
 	return nil
 }
 
-func (o *Options) kubeval(co *ResourceLocation, kubeval *v1alpha1.Test) error {
+func (o *Options) kubeval(co *ResourceLocation, t *v1alpha1.Test) error {
+	if len(t.Args) > 0 {
+		o.KubevalPlugin.Args = t.Args
+	}
 	bin, err := o.KubevalPlugin.GetBinary(nil)
 	if err != nil {
 		return errors.Wrapf(err, "failed to get the kubeval binary")
 	}
 
-	args := []string{"-o", "json", "-d", co.OutputDir}
+	args := []string{"-d", "."}
 	args = append(args, o.KubevalPlugin.Args...)
 	c := &cmdrunner.Command{
+		Dir:  co.OutputDir,
 		Name: bin,
 		Args: args,
 	}
@@ -342,7 +346,7 @@ func (o *Options) kubeval(co *ResourceLocation, kubeval *v1alpha1.Test) error {
 
 	text, err := o.CommandRunner(c)
 	if err != nil {
-		return errors.Wrapf(err, "failed to run %s", c.CLI())
+		log.Logger().Infof("kubeval returned error %s", err.Error())
 	}
 
 	log.Logger().Infof("result:\n%s", termcolor.ColorStatus(text))
