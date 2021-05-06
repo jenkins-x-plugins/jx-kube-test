@@ -7,7 +7,13 @@
 [![Slack Status](https://img.shields.io/badge/slack-join_chat-white.svg?logo=slack&style=social)](https://slack.k8s.io/)
 
 jx-kube-test is a command line tool for testing Kubernetes resources generated via helm, helmfile or kustomize.
+  
 
+## Configuration
+
+You can configure the tests to run by creating a `.jx/kube-test/settings.yaml` file using the 
+
+* [KubeTest Configuration Reference](docs/config.md#kubetest.jenkins-x.io/v1alpha1.KubeTest)
 
 ## Commands
 
