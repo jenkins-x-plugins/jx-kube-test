@@ -131,6 +131,12 @@ func (o *Options) Validate() error {
 	if o.Settings == nil {
 		return errors.Errorf("failed to discover or generate settings")
 	}
+	if o.Settings.Spec.OutputDir != "" {
+		if o.Settings.Spec.Format == "" {
+			log.Logger().Warnf("no spec.format is specified in %s so defaulting to 'tap'", o.SettingsFile)
+			o.Settings.Spec.Format = "tap"
+		}
+	}
 	return nil
 }
 
@@ -336,21 +342,14 @@ func (o *Options) kubeval(co *ResourceLocation, t *v1alpha1.Test) error {
 
 	args := []string{"-d", "."}
 	args = append(args, o.KubevalPlugin.Args...)
+	args = AddFormatFlags(o.Settings, "o", "output", args)
+
 	c := &cmdrunner.Command{
 		Dir:  co.OutputDir,
 		Name: bin,
 		Args: args,
 	}
-
-	log.Logger().Infof("kubeval is verifying %s...", co.Description)
-
-	text, err := o.CommandRunner(c)
-	if err != nil {
-		log.Logger().Infof("kubeval returned error %s", err.Error())
-	}
-
-	log.Logger().Infof("result:\n%s", termcolor.ColorStatus(text))
-	return nil
+	return o.runTestCommand("kubeval", co, c)
 }
 
 func (o *Options) kubescore(co *ResourceLocation, t *v1alpha1.Test) error {
@@ -472,4 +471,52 @@ func (o *Options) createDefaultSettings() *v1alpha1.KubeTest {
 			},
 		},
 	}
+}
+
+func (o *Options) runTestCommand(name string, co *ResourceLocation, c *cmdrunner.Command) error {
+	outputDir := o.Settings.Spec.OutputDir
+	format := o.Settings.Spec.Format
+
+	if outputDir != "" {
+		err := os.MkdirAll(outputDir, files.DefaultDirWritePermissions)
+		if err != nil {
+			return errors.Wrapf(err, "failed to create dir %s", outputDir)
+		}
+	}
+
+	log.Logger().Infof("%s is verifying %s...", name, co.Description)
+
+	text, err := o.CommandRunner(c)
+	if err != nil {
+		log.Logger().Infof("%s returned error", name)
+		log.Logger().Debugf("%s returned error %s", name, err.Error())
+	}
+
+	if outputDir != "" {
+		path := filepath.Join(outputDir, name+"."+format)
+		err = ioutil.WriteFile(path, []byte(text), files.DefaultFileWritePermissions)
+		if err != nil {
+			return errors.Wrapf(err, "failed to save file %s", path)
+		}
+		log.Logger().Infof("saved %s results in %s", name, info(path))
+		return nil
+	}
+	log.Logger().Infof("result:\n%s", termcolor.ColorStatus(text))
+	return nil
+}
+
+// AddFormatFlags if the format is specified lets add it as a command line argument
+func AddFormatFlags(settings *v1alpha1.KubeTest, flag string, optionName string, args []string) []string {
+	if settings.Spec.Format == "" {
+		return args
+	}
+
+	// lets check if we already have the format flag
+	oldValue := options.ArgumentsOptionValue(args, flag, optionName)
+	if oldValue != "" {
+		return args
+	}
+
+	args = append(args, "--"+optionName, settings.Spec.Format)
+	return args
 }

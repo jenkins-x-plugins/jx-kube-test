@@ -35,6 +35,12 @@ type KubeTestList struct {
 type KubeTestSpec struct {
 	// Rules the rules to apply
 	Rules []Rule `json:"rules,omitempty"`
+
+	// OutputDir the output directory to store the reports
+	OutputDir string `json:"outputDir,omitempty"`
+
+	// Format the output format
+	Format string `json:"format,omitempty"`
 }
 
 // Rule the rules to apply

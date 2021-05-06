@@ -1,8 +1,10 @@
 package run_test
 
 import (
+	"github.com/jenkins-x-plugins/jx-kube-test/pkg/apis/kubetest/v1alpha1"
 	"github.com/jenkins-x-plugins/jx-kube-test/pkg/cmd/run"
 	"github.com/jenkins-x/jx-helpers/v3/pkg/cmdrunner"
+	"github.com/stretchr/testify/assert"
 	"io/ioutil"
 	"path/filepath"
 	"strings"
@@ -68,4 +70,45 @@ func TestCmdRun(t *testing.T) {
 		testhelpers.AssertTextFilesEqual(t, filepath.Join(runDir, "expected.sh"), f, "generated file")
 	}
 
+}
+
+func TestAddFormatFlags(t *testing.T) {
+	testCases := []struct {
+		args     []string
+		format   string
+		expected []string
+	}{
+		{
+			args:     []string{"-o", "json"},
+			format:   "tap",
+			expected: []string{"-o", "json"},
+		},
+		{
+			args:     []string{"-o", "tap"},
+			format:   "tap",
+			expected: []string{"-o", "tap"},
+		},
+		{
+			format:   "tap",
+			expected: []string{"--output", "tap"},
+		},
+		{
+			args:     []string{"-c", "cheese"},
+			format:   "tap",
+			expected: []string{"-c", "cheese", "--output", "tap"},
+		},
+	}
+
+	flag := "o"
+	optionName := "output"
+
+	for _, tc := range testCases {
+		settings := &v1alpha1.KubeTest{}
+		settings.Spec.Format = tc.format
+		got := run.AddFormatFlags(settings, flag, optionName, tc.args)
+
+		assert.Equal(t, tc.expected, got, "for format %s", tc.format)
+
+		t.Logf("got args: %v for format %s\n", got, tc.format)
+	}
 }
