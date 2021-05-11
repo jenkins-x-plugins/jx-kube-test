@@ -123,7 +123,8 @@ func GetKubevalBinary(version string) (string, error) {
 func CreateKubevalPlugin(version string) jenkinsv1.Plugin {
 	binaries := extensions.CreateBinaries(func(p extensions.Platform) string {
 		ext := ".tar.gz"
-		return fmt.Sprintf("https://github.com/instrumenta/kubeval/releases/download/v%s/kubeval-%s-%s%s", version, strings.ToLower(p.Goos), strings.ToLower(p.Goarch), ext)
+		//return fmt.Sprintf("https://github.com/instrumenta/kubeval/releases/download/v%s/kubeval-%s-%s%s", version, strings.ToLower(p.Goos), strings.ToLower(p.Goarch), ext)
+		return fmt.Sprintf("https://github.com/jenkins-x-plugins/kubeval/releases/download/v%s/kubeval_%s_%s_%s%s", version, version, strings.ToLower(p.Goos), strings.ToLower(p.Goarch), ext)
 	})
 
 	plugin := jenkinsv1.Plugin{

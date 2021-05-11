@@ -19,7 +19,7 @@ const (
 	KubevalPluginName = "kubeval"
 
 	// KubevalVersion the default version of kubeval to use
-	KubevalVersion = "0.16.1"
+	KubevalVersion = "0.16.4"
 
 	// PolarisPluginName the default name of the polaris plugin
 	PolarisPluginName = "polaris"
