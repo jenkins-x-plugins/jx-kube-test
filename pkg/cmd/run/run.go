@@ -340,12 +340,12 @@ func (o *Options) kubeval(co *ResourceLocation, t *v1alpha1.Test) error {
 		return errors.Wrapf(err, "failed to get the kubeval binary")
 	}
 
-	args := []string{"-d", "."}
+	args := []string{"-d", co.OutputDir}
 	args = append(args, o.KubevalPlugin.Args...)
+	args = append(args, t.Args...)
 	args = AddFormatFlags(o.Settings, "o", "output", args)
 
 	c := &cmdrunner.Command{
-		Dir:  co.OutputDir,
 		Name: bin,
 		Args: args,
 	}
@@ -367,9 +367,11 @@ func (o *Options) kubescore(co *ResourceLocation, t *v1alpha1.Test) error {
 		return nil
 	}
 
-	args := []string{"score", "-o", "json"}
+	args := []string{"score"}
 	args = append(args, o.KubeScorePlugin.Args...)
+	args = append(args, t.Args...)
 	args = append(args, fileNames...)
+	args = AddFormatFlags(o.Settings, "o", "output", args)
 	c := &cmdrunner.Command{
 		Name: bin,
 		Args: args,
@@ -393,8 +395,10 @@ func (o *Options) conftest(co *ResourceLocation, t *v1alpha1.Test) error {
 		return errors.Wrapf(err, "failed to get the polaris binary")
 	}
 
-	args := []string{"test", "-o", "json", co.OutputDir}
+	args := []string{"test", co.OutputDir}
 	args = append(args, o.ConftestPlugin.Args...)
+	args = append(args, t.Args...)
+	args = AddFormatFlags(o.Settings, "o", "output", args)
 	c := &cmdrunner.Command{
 		Name: bin,
 		Args: args,
@@ -418,8 +422,10 @@ func (o *Options) polaris(co *ResourceLocation, t *v1alpha1.Test) error {
 		return errors.Wrapf(err, "failed to get the polaris binary")
 	}
 
-	args := []string{"audit", "--audit-path", co.OutputDir, "--format", "json"}
+	args := []string{"audit", "--audit-path", co.OutputDir}
 	args = append(args, o.PolarisPlugin.Args...)
+	args = append(args, t.Args...)
+	args = AddFormatFlags(o.Settings, "f", "format", args)
 	c := &cmdrunner.Command{
 		Name: bin,
 		Args: args,
