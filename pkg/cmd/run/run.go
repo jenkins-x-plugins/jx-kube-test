@@ -302,7 +302,7 @@ func (o *Options) findChartDirs(err error, dir string) ([]string, error) {
 }
 
 func (o *Options) verifyResources(co *ResourceLocation, tests *v1alpha1.Tests) error {
-	log.Logger().Infof("verifying %s output at %s", co.Description, co.OutputDir)
+	log.Logger().Debugf("verifying %s output at %s", co.Description, co.OutputDir)
 
 	if tests.Kubeval != nil {
 		err := o.kubeval(co, tests.Kubeval)
@@ -377,16 +377,7 @@ func (o *Options) kubescore(co *ResourceLocation, t *v1alpha1.Test) error {
 		Args: args,
 	}
 
-	log.Logger().Infof("kube-score is verifying %s...", co.Description)
-
-	text, err := o.CommandRunner(c)
-	if err != nil {
-		log.Logger().Infof("kube-score returned error %s", err.Error())
-		//return errors.Wrapf(err, "failed to run %s", c.CLI())
-	}
-
-	log.Logger().Infof("result:\n%s", termcolor.ColorStatus(text))
-	return nil
+	return o.runTestCommand("kube-score", co, c)
 }
 
 func (o *Options) conftest(co *ResourceLocation, t *v1alpha1.Test) error {
@@ -404,16 +395,7 @@ func (o *Options) conftest(co *ResourceLocation, t *v1alpha1.Test) error {
 		Args: args,
 	}
 
-	log.Logger().Infof("conftest is verifying %s...", co.Description)
-
-	text, err := o.CommandRunner(c)
-	if err != nil {
-		log.Logger().Infof("conftest returned error %s", err.Error())
-		//return errors.Wrapf(err, "failed to run %s", c.CLI())
-	}
-
-	log.Logger().Infof("result:\n%s", termcolor.ColorStatus(text))
-	return nil
+	return o.runTestCommand("conftest", co, c)
 }
 
 func (o *Options) polaris(co *ResourceLocation, t *v1alpha1.Test) error {
@@ -431,16 +413,7 @@ func (o *Options) polaris(co *ResourceLocation, t *v1alpha1.Test) error {
 		Args: args,
 	}
 
-	log.Logger().Infof("polaris is verifying %s...", co.Description)
-
-	text, err := o.CommandRunner(c)
-	if err != nil {
-		log.Logger().Infof("polaris returned error %s", err.Error())
-		//return errors.Wrapf(err, "failed to run %s", c.CLI())
-	}
-
-	log.Logger().Infof("result:\n%s", termcolor.ColorStatus(text))
-	return nil
+	return o.runTestCommand("polaris", co, c)
 }
 
 func (o *Options) findYAMLFiles(dir string) ([]string, error) {
@@ -490,11 +463,10 @@ func (o *Options) runTestCommand(name string, co *ResourceLocation, c *cmdrunner
 		}
 	}
 
-	log.Logger().Infof("%s is verifying %s...", name, co.Description)
+	log.Logger().Debugf("%s is verifying %s...", name, co.Description)
 
 	text, err := o.CommandRunner(c)
 	if err != nil {
-		log.Logger().Infof("%s returned error", name)
 		log.Logger().Debugf("%s returned error %s", name, err.Error())
 	}
 
@@ -507,7 +479,8 @@ func (o *Options) runTestCommand(name string, co *ResourceLocation, c *cmdrunner
 		log.Logger().Infof("saved %s results in %s", name, info(path))
 		return nil
 	}
-	log.Logger().Infof("result:\n%s", termcolor.ColorStatus(text))
+	log.Logger().Infof("%s result:", name)
+	log.Logger().Infof(text)
 	return nil
 }
 
@@ -525,4 +498,7 @@ func AddFormatFlags(settings *v1alpha1.KubeTest, flag string, optionName string,
 
 	args = append(args, "--"+optionName, settings.Spec.Format)
 	return args
+}
+
+func logResult(text string) {
 }
