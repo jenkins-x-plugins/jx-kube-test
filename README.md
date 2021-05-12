@@ -14,6 +14,18 @@ jx-kube-test is a command line tool for testing Kubernetes resources generated v
 You can configure the tests to run by creating a `.jx/kube-test/settings.yaml` file using the 
 
 * [KubeTest Configuration Reference](docs/config.md#kubetest.jenkins-x.io/v1alpha1.KubeTest)
+         
+
+## Using in a GitOps repository
+
+If you use a GitOps repository layout like the [Jenkins X GitOps Layout Conventions](https://github.com/jenkins-x-plugins/jx-gitops/blob/main/docs/git_layout.md) then you'll have a root folder like `config-root`  in which case you can perform the default kubernetes validation on your resources via:
+
+
+```bash 
+jx kube test run --source-dir config-root
+```
+
+To see the available arguments run `jx kube test run --help` or [browse the CLI reference](docs/cmd/jx-kube-test_run.md#options)
 
 ## Commands
 

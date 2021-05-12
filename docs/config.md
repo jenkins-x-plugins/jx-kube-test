@@ -416,5 +416,5 @@ Test
 <hr/>
 <p><em>
 Generated with <code>gen-crd-api-reference-docs</code>
-on git commit <code>bebe38e</code>.
+on git commit <code>7dea768</code>.
 </em></p>

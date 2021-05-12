@@ -1,0 +1,15 @@
+apiVersion: updatebot.jenkins-x.io/v1alpha1
+kind: UpdateConfig
+spec:
+  rules:
+    - urls:
+        - https://github.com/jenkins-x/jx3-pipeline-catalog
+      changes:
+        - regex:
+            pattern: "gcr.io/jenkinsxio/jx-kube-test:(.*)"
+            files:
+              - "**/*.yaml"
+        - regex:
+            pattern: "ghcr.io/jenkins-x-plugins/jx-kube-test:(.*)"
+            files:
+              - "**/*.yaml"

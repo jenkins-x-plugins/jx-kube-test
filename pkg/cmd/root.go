@@ -11,7 +11,7 @@ import (
 // Main creates the new command
 func Main() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "kube-test",
+		Use:   "jx-kube-test",
 		Short: "commands for working with GitOps based git repositories",
 		Run: func(cmd *cobra.Command, args []string) {
 			err := cmd.Help()
