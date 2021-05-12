@@ -44,6 +44,7 @@ type Options struct {
 	WorkDir         string
 	OutFile         string
 	ChartsDir       string
+	SourceDir       string
 	RecurseCharts   bool
 	Helm            BinaryPlugin
 	ConftestPlugin  BinaryPlugin
@@ -83,8 +84,9 @@ func NewCmdRun() (*cobra.Command, *Options) {
 	o.PolarisPlugin.AddFlags(cmd, "polaris", ktplugins.PolarisVersion, ktplugins.GetPolarisBinary)
 
 	cmd.Flags().StringVarP(&o.Dir, "dir", "d", ".", "the directory to look for helm, helmfile or kustomize files")
-	cmd.Flags().StringVarP(&o.ChartsDir, "chart-dir", "", "charts", "the directory to look for helm charts if no .jx/kube-test/settings.yaml file is found")
-	cmd.Flags().BoolVarP(&o.RecurseCharts, "recurse", "r", true, "should we recurse through the chart dir to find charts if no .jx/kube-test/settings.yaml file is found")
+	cmd.Flags().StringVarP(&o.ChartsDir, "chart-dir", "", "", "the directory to look for helm charts if no .jx/kube-test/settings.yaml file is found")
+	cmd.Flags().StringVarP(&o.SourceDir, "source-dir", "", "", "the directory to look for kubernetes resources to validate")
+	cmd.Flags().BoolVarP(&o.RecurseCharts, "recurse", "r", false, "should we recurse through the chart dir to find charts if no .jx/kube-test/settings.yaml file is found")
 	cmd.Flags().StringVarP(&o.SettingsFile, "settings", "s", "", "the settings file to use. If not specified will look in .jx/kube-test/settings.yaml in the directory")
 	cmd.Flags().StringVarP(&o.WorkDir, "work-dir", "w", "", "the work directory used to generate the output. If not specified a new temporary dir is created")
 	cmd.Flags().StringVarP(&o.OutFile, "output", "o", "", "the file to generate")
@@ -434,22 +436,48 @@ func (o *Options) findYAMLFiles(dir string) ([]string, error) {
 }
 
 func (o *Options) createDefaultSettings() *v1alpha1.KubeTest {
-	return &v1alpha1.KubeTest{
+	if len(o.KubevalPlugin.Args) == 0 {
+		o.KubevalPlugin.Args = []string{
+			"--strict",
+			"--ignore-helm-source",
+			"--log-level",
+			"warn",
+			"--kubernetes-version=1.18.1",
+			"--additional-schema-locations",
+			"https://jenkins-x.github.io/jenkins-x-schemas",
+			"--skip-kinds",
+			"CustomResourceDefinition,Pipeline",
+		}
+	}
+	kubevalTest := &v1alpha1.Test{
+		Version: o.KubevalPlugin.Version,
+		Args:    o.KubevalPlugin.Args,
+	}
+
+	answer := &v1alpha1.KubeTest{
 		Spec: v1alpha1.KubeTestSpec{
 			Rules: []v1alpha1.Rule{
 				{
-					Charts: &v1alpha1.Charts{
-						Dir:     o.ChartsDir,
-						Recurse: o.RecurseCharts,
-					},
 					Tests: v1alpha1.Tests{
-						Kubeval: &v1alpha1.Test{},
-						Polaris: &v1alpha1.Test{},
+						Kubeval: kubevalTest,
 					},
 				},
 			},
 		},
 	}
+
+	if o.SourceDir != "" {
+		answer.Spec.Rules[0].Resources = &v1alpha1.Source{
+			Dir: o.SourceDir,
+		}
+	}
+	if o.ChartsDir != "" {
+		answer.Spec.Rules[0].Charts = &v1alpha1.Charts{
+			Dir:     o.ChartsDir,
+			Recurse: o.RecurseCharts,
+		}
+	}
+	return answer
 }
 
 func (o *Options) runTestCommand(name string, co *ResourceLocation, c *cmdrunner.Command) error {
