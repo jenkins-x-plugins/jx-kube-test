@@ -37,11 +37,13 @@ func TestCmdRun(t *testing.T) {
 		srcDir := filepath.Join(testDir, name)
 		runDir := filepath.Join(tmpDir, name)
 
+
 		t.Logf("running test %s in dir %s\n", name, runDir)
 
 		_, o := run.NewCmdRun()
 		o.Dir = srcDir
 		o.ChartsDir = srcDir
+		o.RecurseCharts = true
 		o.CommandRunner = cmdrunner.DefaultCommandRunner
 		err = o.Run()
 		require.NoError(t, err, "failed to run the command")
