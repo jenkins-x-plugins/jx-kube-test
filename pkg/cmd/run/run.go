@@ -18,7 +18,6 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 )
 
@@ -248,16 +247,67 @@ func (o *Options) TestCharts(rule *v1alpha1.Rule, charts *v1alpha1.Charts) error
 	return nil
 }
 
+// HelmTemplateOptions options for templating helm charts
+type HelmTemplateOptions struct {
+	Name        string
+	ValuesFiles []string
+}
+
 func (o *Options) helmTemplateAndVerify(rule *v1alpha1.Rule, helmbin string, d string) error {
+	options := []HelmTemplateOptions{
+		{
+			Name: "default-values",
+		},
+	}
+
+	// lets discover any options files...
+	kubeTestValuesDir := filepath.Join(d, ".jx-kube-test")
+	exists, err := files.DirExists(kubeTestValuesDir)
+	if err != nil {
+		return errors.Wrapf(err, "failed to check if dir exists %s", kubeTestValuesDir)
+	}
+	if exists {
+		fs, err := ioutil.ReadDir(kubeTestValuesDir)
+		if err != nil {
+			return errors.Wrapf(err, "failed to read dir %s", kubeTestValuesDir)
+		}
+		for _, f := range fs {
+			if !f.IsDir() {
+				continue
+			}
+			name := f.Name()
+			path := filepath.Join(kubeTestValuesDir, name, "values.yaml")
+			exists, err = files.FileExists(path)
+			if err != nil {
+				return errors.Wrapf(err, "failed to check if file exists %s", path)
+			}
+			if exists {
+				options = append(options, HelmTemplateOptions{
+					Name:        name,
+					ValuesFiles: []string{path},
+				})
+			}
+		}
+	}
+
+	for i := range options {
+		opt := &options[i]
+
+		err := o.helmTemplateAndVerifyValues(rule, opt, helmbin, d)
+		if err != nil {
+			return errors.Wrapf(err, "failed to template and verify values %s", opt.Name)
+		}
+	}
+	return nil
+}
+
+func (o *Options) helmTemplateAndVerifyValues(rule *v1alpha1.Rule, opts *HelmTemplateOptions, helmbin, d string) error {
 	rel, err := filepath.Rel(o.Dir, d)
 	if err != nil {
 		log.Logger().Warnf("failed to find relative chart dir from %s to %s", o.Dir, d)
 		rel = d
 	}
-
-	// TODO support iterating through available values to pass in
-	i := 1
-	releaseName := "rel" + strconv.Itoa(i)
+	releaseName := opts.Name
 	outDir := filepath.Join(o.WorkDir, rel, releaseName)
 
 	err = os.MkdirAll(outDir, files.DefaultDirWritePermissions)
@@ -265,18 +315,21 @@ func (o *Options) helmTemplateAndVerify(rule *v1alpha1.Rule, helmbin string, d s
 		return errors.Wrapf(err, "failed to create output dir %s", outDir)
 	}
 
-	args := []string{"template", "--output-dir", outDir, releaseName, d}
+	args := []string{"template", "--output-dir", outDir}
+	for _, valuesFile := range opts.ValuesFiles {
+		args = append(args, "--values", valuesFile)
+	}
+	args = append(args, releaseName, d)
 	c := &cmdrunner.Command{
 		Name: helmbin,
 		Args: args,
-		Out:  os.Stdout,
-		Err:  os.Stderr,
 	}
 
-	_, err = o.CommandRunner(c)
+	text, err := o.CommandRunner(c)
 	if err != nil {
 		return errors.Wrapf(err, "failed to run %s", c.CLI())
 	}
+	log.Logger().Debugf(text)
 
 	co := &ResourceLocation{
 		Description: fmt.Sprintf("chart %s release %s", d, releaseName),
@@ -292,14 +345,14 @@ func (o *Options) helmTemplateAndVerify(rule *v1alpha1.Rule, helmbin string, d s
 // findChartDirs lets find all the charts in the given dir
 func (o *Options) findChartDirs(err error, dir string) ([]string, error) {
 	var chartDirs []string
-	err = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		name := info.Name()
-		if info.IsDir() || name != "Chart.yaml" {
+	err = filepath.Walk(dir, func(path string, f os.FileInfo, err error) error {
+		name := f.Name()
+		if f.IsDir() || name != "Chart.yaml" {
 			return nil
 		}
 
 		chartDir := filepath.Dir(path)
-		log.Logger().Infof("found chart in dir %s", chartDir)
+		log.Logger().Infof("found chart at: %s", info(chartDir))
 		chartDirs = append(chartDirs, chartDir)
 		return nil
 	})
@@ -533,7 +586,7 @@ func (o *Options) runTestCommand(name string, co *ResourceLocation, c *cmdrunner
 		log.Logger().Infof("saved %s results in %s", name, info(path))
 		return nil
 	}
-	log.Logger().Infof("%s result:", name)
+	log.Logger().Infof("%s %s result:", info(name), co.Description)
 	log.Logger().Infof(text)
 	return nil
 }
