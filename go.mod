@@ -2,9 +2,8 @@ module github.com/jenkins-x-plugins/jx-kube-test
 
 require (
 	github.com/cpuguy83/go-md2man v1.0.10
-	github.com/jenkins-x-plugins/jx-gitops v0.2.83
-	github.com/jenkins-x/gen-crd-api-reference-docs v0.1.6 // indirect
-	github.com/jenkins-x/jx-api/v4 v4.0.29
+	github.com/jenkins-x-plugins/jx-gitops v0.2.84
+	github.com/jenkins-x/jx-api/v4 v4.0.33
 	github.com/jenkins-x/jx-helpers/v3 v3.0.113
 	github.com/jenkins-x/jx-logging/v3 v3.0.6
 	github.com/pkg/errors v0.9.1
