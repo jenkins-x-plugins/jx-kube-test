@@ -127,7 +127,10 @@ func (o *Options) Validate() error {
 			}
 			log.Logger().Debugf("loaded settings file %s", info(o.SettingsFile))
 		} else {
-			o.Settings = o.createDefaultSettings()
+			o.Settings, err = o.createDefaultSettings()
+			if err != nil {
+				return errors.Wrapf(err, "failed to create default settings")
+			}
 		}
 	}
 	if o.Settings == nil {
@@ -435,7 +438,7 @@ func (o *Options) findYAMLFiles(dir string) ([]string, error) {
 	return answer, nil
 }
 
-func (o *Options) createDefaultSettings() *v1alpha1.KubeTest {
+func (o *Options) createDefaultSettings() (*v1alpha1.KubeTest, error) {
 	if len(o.KubevalPlugin.Args) == 0 {
 		o.KubevalPlugin.Args = []string{
 			"--strict",
@@ -466,6 +469,29 @@ func (o *Options) createDefaultSettings() *v1alpha1.KubeTest {
 		},
 	}
 
+	if o.SourceDir == "" && o.ChartsDir == "" {
+		// lets try detect the common source dirs
+		dir := filepath.Join(o.Dir, "config-root")
+		exists, err := files.DirExists(dir)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to check if dir exists %s", dir)
+		}
+		if exists {
+			o.SourceDir = dir
+		} else {
+			dir = filepath.Join(o.Dir, "charts")
+			exists, err = files.DirExists(dir)
+			if err != nil {
+				return nil, errors.Wrapf(err, "failed to check if dir exists %s", dir)
+			}
+			if exists {
+				o.ChartsDir = dir
+				o.RecurseCharts = true
+			} else {
+				return nil, errors.Errorf("please specify --source-dir or --chart-dir or create a .jx/kube-test/settings.yaml file")
+			}
+		}
+	}
 	if o.SourceDir != "" {
 		answer.Spec.Rules[0].Resources = &v1alpha1.Source{
 			Dir: o.SourceDir,
@@ -477,7 +503,7 @@ func (o *Options) createDefaultSettings() *v1alpha1.KubeTest {
 			Recurse: o.RecurseCharts,
 		}
 	}
-	return answer
+	return answer, nil
 }
 
 func (o *Options) runTestCommand(name string, co *ResourceLocation, c *cmdrunner.Command) error {
