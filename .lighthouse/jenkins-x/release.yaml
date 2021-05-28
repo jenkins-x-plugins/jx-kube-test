@@ -27,6 +27,12 @@ spec:
           resources: {}
         - name: build-and-push-image
           resources: {}
+          env:
+          - name: DOCKER_REGISTRY_ORG
+            value: jenkins-x-plugins
+        - image: uses:jenkins-x/jx3-pipeline-catalog/tasks/cosign/cosign.yaml@versionStream
+          name: ""
+          resources: {}
         - name: chart-docs
           resources: {}
         - name: release-chart
